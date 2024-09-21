@@ -2,8 +2,8 @@ import { Boom } from '@hapi/boom'
 import { Logger } from 'pino'
 import { proto } from '../../WAProto'
 import { SignalRepository, WAMessageKey } from '../Types'
-import { areJidsSameUser, BinaryNode, isJidBroadcast, isJidGroup, isJidNewsletter, isJidStatusBroadcast, isJidUser, isLidUser } from '../WABinary'
-import { unpadRandomMax16 } from './generics'
+import { areJidsSameUser, BinaryNode, isJidBroadcast, isJidGroup, isJidStatusBroadcast, isJidUser, isLidUser } from '../WABinary'
+import { BufferJSON, unpadRandomMax16 } from './generics'
 
 export const NO_MESSAGE_FOUND_ERROR_TEXT = 'Message absent from node'
 
@@ -64,6 +64,10 @@ export function decodeMessageNode(
 		msgType = 'group'
 		author = participant
 		chatId = from
+	} else if(isJidNewsletter(from)) {
+		msgType = 'newsletter'
+		author = from
+		chatId = from
 	} else if(isJidBroadcast(from)) {
 		if(!participant) {
 			throw new Boom('No participant in group message')
@@ -87,13 +91,14 @@ export function decodeMessageNode(
 	}
 
 	const fromMe = (isLidUser(from) ? isMeLid : isMe)(stanza.attrs.participant || stanza.attrs.from)
-	const pushname = stanza?.attrs?.notify
+	const pushname = stanza.attrs.notify
 
 	const key: WAMessageKey = {
 		remoteJid: chatId,
 		fromMe,
 		id: msgId,
-		participant
+		participant,
+		'server_id': stanza.attrs?.server_id
 	}
 
 	const fullMessage: proto.IWebMessageInfo = {
@@ -177,14 +182,14 @@ export const decryptMessageNode = (
 						let msg: proto.IMessage = proto.Message.decode(e2eType !== 'plaintext' ? unpadRandomMax16(msgBuffer) : msgBuffer)
 						msg = msg.deviceSentMessage?.message || msg
 						if(msg.senderKeyDistributionMessage) {
-						    try {
+							try {
 								await repository.processSenderKeyDistributionMessage({
 									authorJid: author,
 									item: msg.senderKeyDistributionMessage
 								})
 							} catch(err) {
 								logger.error({ key: fullMessage.key, err }, 'failed to decrypt message')
-						        }
+							}
 						}
 
 						if(fullMessage.message) {
